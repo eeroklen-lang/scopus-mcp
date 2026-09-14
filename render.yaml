@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: scopus-mcp
+    runtime: docker
+    plan: free
+    envVars:
+      - key: MCP_TRANSPORT
+        value: http
+      - key: SCOPUS_API_KEY
+        sync: false
+      - key: MCP_AUTH_TOKEN
+        sync: false
