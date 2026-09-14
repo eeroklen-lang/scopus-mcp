@@ -110,7 +110,11 @@ def main() -> None:
         return
 
     import uvicorn
+    from mcp.server.streamable_http import TransportSecuritySettings
 
-    app = AuthMiddleware(mcp.streamable_http_app())
+    # DNS-rebinding host checks are for browser-facing local servers; this is a
+    # public HTTPS endpoint already gated by AuthMiddleware's shared secret.
+    security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    app = AuthMiddleware(mcp.streamable_http_app(transport_security=security))
     port = int(os.environ.get("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
