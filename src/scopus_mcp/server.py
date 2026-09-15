@@ -19,6 +19,15 @@ def _headers() -> dict[str, str]:
     return {"X-ELS-APIKey": SCOPUS_API_KEY, "Accept": "application/json"}
 
 
+async def _get(path: str, params: dict[str, str]) -> dict:
+    """GET a Scopus API endpoint, raising a descriptive error on failure."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{BASE_URL}{path}", headers=_headers(), params=params, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Scopus API returned {resp.status_code} for {path}: {resp.text[:500]}")
+    return resp.json()
+
+
 @mcp.tool()
 async def search_scopus(query: str, count: int = 10) -> str:
     """Search Scopus for publications matching a query.
@@ -27,16 +36,8 @@ async def search_scopus(query: str, count: int = 10) -> str:
         query: Scopus search query (e.g. "TITLE-ABS-KEY(large language models)").
         count: Number of results to return (max 25).
     """
-    params = {"query": query, "count": min(count, 25)}
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{BASE_URL}/search/scopus",
-            headers=_headers(),
-            params=params,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    params = {"query": query, "count": str(min(count, 25))}
+    data = await _get("/search/scopus", params)
 
     entries = data.get("search-results", {}).get("entry", [])
     if not entries:
@@ -64,15 +65,7 @@ async def get_abstract(scopus_id: str) -> str:
     Args:
         scopus_id: The Scopus document ID (e.g. "85123456789").
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{BASE_URL}/abstract/scopus_id/{scopus_id}",
-            headers=_headers(),
-            params={"view": "META_ABS"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await _get(f"/abstract/scopus_id/{scopus_id}", {"view": "META_ABS"})
 
     core = data.get("abstracts-retrieval-response", {}).get("coredata", {})
     title = core.get("dc:title", "Untitled")
