@@ -24,7 +24,7 @@ async def _get(path: str, params: dict[str, str]) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{BASE_URL}{path}", headers=_headers(), params=params, timeout=30)
     if resp.status_code >= 400:
-        raise RuntimeError(f"Scopus API returned {resp.status_code} for {path}: {resp.text[:500]}")
+        raise RuntimeError(f"Elsevier API returned {resp.status_code} for {path}: {resp.text[:500]}")
     return resp.json()
 
 
@@ -66,6 +66,67 @@ async def search_scopus(query: str, count: int = 10) -> str:
         lines.append(
             f"- [Scopus] {title} ({year}) — {authors}\n"
             f"  DOI: {doi or 'n/a'} | Cited by: {cited_by} | {_record_url(e)}"
+        )
+    return "\n".join(lines)
+
+
+_SD_ALLOWED_COUNTS = (10, 25, 50, 100)
+
+
+def _sd_authors(entry: dict) -> str:
+    creator = entry.get("dc:creator")
+    if creator:
+        return creator
+    author = (entry.get("authors") or {}).get("author")
+    if isinstance(author, list):
+        return ", ".join(a.get("name", str(a)) if isinstance(a, dict) else str(a) for a in author)
+    return author or "Unknown"
+
+
+def _sd_link(entry: dict) -> str:
+    """Link back to the record's page on sciencedirect.com, per Elsevier's search-widget terms."""
+    for link in entry.get("link", []) or []:
+        if link.get("@ref") == "scidir":
+            return link.get("@href", "")
+    return f"https://www.sciencedirect.com/science/article/pii/{entry.get('pii', '')}"
+
+
+@mcp.tool()
+async def search_sciencedirect(query: str, count: int = 10) -> str:
+    """Search ScienceDirect for publications matching a query.
+
+    Returns core bibliographic data (title, authors, journal, date, pages,
+    DOI/PII, open-access flag) and a link to the record on sciencedirect.com,
+    per Elsevier's search-widget API terms. Abstracts/snippets and author
+    keywords are not yet included pending confirmation of the ScienceDirect
+    Search API's field-alias names.
+
+    Args:
+        query: ScienceDirect boolean search (e.g. "title(quantum) AND srctitle(laser)").
+        count: Number of results to return; snapped up to 10, 25, 50, or 100.
+    """
+    snapped_count = next((c for c in _SD_ALLOWED_COUNTS if count <= c), _SD_ALLOWED_COUNTS[-1])
+    params = {"query": query, "count": str(snapped_count)}
+    data = await _get("/search/sciencedirect", params)
+
+    entries = data.get("search-results", {}).get("entry", [])
+    if not entries:
+        return "No results found."
+
+    lines = []
+    for e in entries:
+        title = e.get("dc:title", "Untitled")
+        authors = _sd_authors(e)
+        year = (e.get("prism:coverDate") or "")[:4]
+        journal = e.get("prism:publicationName", "")
+        start_page = e.get("prism:startingPage", "")
+        end_page = e.get("prism:endingPage", "")
+        pages = f"{start_page}-{end_page}" if start_page and end_page else start_page or "n/a"
+        doi = e.get("prism:doi", "") or e.get("dc:identifier", "").replace("DOI:", "")
+        oa = " [Open Access]" if e.get("openaccess") else ""
+        lines.append(
+            f"- [ScienceDirect] {title} ({year}) — {authors}{oa}\n"
+            f"  {journal} | Pages: {pages} | DOI: {doi or 'n/a'} | {_sd_link(e)}"
         )
     return "\n".join(lines)
 
