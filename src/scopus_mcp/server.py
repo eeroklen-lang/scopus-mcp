@@ -28,9 +28,22 @@ async def _get(path: str, params: dict[str, str]) -> dict:
     return resp.json()
 
 
+def _record_url(entry: dict) -> str:
+    """Link back to the record's page on scopus.com, per Elsevier's federated-search terms."""
+    for link in entry.get("link", []) or []:
+        if link.get("@ref") == "scopus":
+            return link.get("@href", "")
+    eid = entry.get("eid") or f"2-s2.0-{entry.get('dc:identifier', '').replace('SCOPUS_ID:', '')}"
+    return f"https://www.scopus.com/record/display.uri?eid={eid}&origin=resultslist"
+
+
 @mcp.tool()
 async def search_scopus(query: str, count: int = 10) -> str:
     """Search Scopus for publications matching a query.
+
+    Returns core bibliographic data only (title, authors, year, DOI, citation
+    count, and a link to the record on scopus.com) — no abstracts, per
+    Elsevier's federated-search API terms for Scopus.
 
     Args:
         query: Scopus search query (e.g. "TITLE-ABS-KEY(large language models)").
@@ -49,29 +62,12 @@ async def search_scopus(query: str, count: int = 10) -> str:
         authors = e.get("dc:creator", "Unknown")
         year = (e.get("prism:coverDate") or "")[:4]
         doi = e.get("prism:doi", "")
-        scopus_id = e.get("dc:identifier", "").replace("SCOPUS_ID:", "")
         cited_by = e.get("citedby-count", "0")
         lines.append(
-            f"- {title} ({year}) — {authors}\n"
-            f"  Scopus ID: {scopus_id} | DOI: {doi or 'n/a'} | Cited by: {cited_by}"
+            f"- [Scopus] {title} ({year}) — {authors}\n"
+            f"  DOI: {doi or 'n/a'} | Cited by: {cited_by} | {_record_url(e)}"
         )
     return "\n".join(lines)
-
-
-@mcp.tool()
-async def get_abstract(scopus_id: str) -> str:
-    """Fetch the abstract and metadata for a single Scopus publication.
-
-    Args:
-        scopus_id: The Scopus document ID (e.g. "85123456789").
-    """
-    data = await _get(f"/abstract/scopus_id/{scopus_id}", {"view": "META_ABS"})
-
-    core = data.get("abstracts-retrieval-response", {}).get("coredata", {})
-    title = core.get("dc:title", "Untitled")
-    abstract = core.get("dc:description", "No abstract available.")
-    doi = core.get("prism:doi", "n/a")
-    return f"Title: {title}\nDOI: {doi}\n\nAbstract:\n{abstract}"
 
 
 class AuthMiddleware:
